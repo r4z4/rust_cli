@@ -1,7 +1,8 @@
+use chrono::{Duration, Datelike};
 //walks a filesystem and finds duplicate files
 use indicatif::{ParallelProgressIterator, ProgressStyle};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::{collections::HashMap, time::SystemTime};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use walkdir::WalkDir;
@@ -23,18 +24,14 @@ pub fn filter_session_matched(matches: Vec<String>) -> Vec<String> {
 }
 
 //Find files matching a pattern
-pub fn find(files: Vec<String>, pattern: &str, dt: Option<&DateTime<Utc>>) -> Vec<String> {
+pub fn find(files: Vec<String>, pattern: &str) -> Vec<String> {
     let mut matches = Vec::new();
     for file in files {
         if file.contains(pattern) {
             matches.push(file);
         }
     }
-    if dt.is_some() {
-        filter_session_matched(matches)
-    } else {
-        matches
-    }
+    matches
 }
 
 /*  Parallel version of checksum using rayon with a mutex to ensure
@@ -61,10 +58,16 @@ pub fn checksum(files: Vec<String>) -> Result<HashMap<String, Vec<String>>, Box<
     Ok(checksums.into_inner().unwrap())
 }
 
+pub fn get_last_tuesday() -> DateTime<Utc> {
+    let now: DateTime<Utc> = Utc::now();
+    let c:i64 = ((now.weekday().num_days_from_sunday() + 4) % 7 + 1) as i64;
+    now - Duration::days(c)
+}
+
 /*  Parallel version of checksum using rayon with a mutex to ensure
  that the HashMap is not accessed by multiple threads at the same time
 */
-pub fn file_times(files: Vec<String>) -> Result<HashMap<DateTime<Utc>, Vec<String>>, Box<dyn Error>> {
+pub fn file_times(files: Vec<String>) -> Result<HashMap<DateTime<Utc>, String>, Box<dyn Error>> {
     //set the progress bar style to allow for elapsed time and percentage complete
     let file_dates = std::sync::Mutex::new(HashMap::new());
     let pb = indicatif::ProgressBar::new(files.len() as u64);
@@ -73,7 +76,7 @@ pub fn file_times(files: Vec<String>) -> Result<HashMap<DateTime<Utc>, Vec<Strin
         .unwrap();
     pb.set_style(sty);
     files.par_iter().progress_with(pb).for_each(|file| {
-        let metadata = fs::metadata("foo.txt");
+        let metadata = fs::metadata(file);
         match metadata {
             Ok(metadata) => {
                 let modified =
@@ -84,11 +87,9 @@ pub fn file_times(files: Vec<String>) -> Result<HashMap<DateTime<Utc>, Vec<Strin
                     };
                 let modified_at = modified.unwrap();
                 let mod_dt = systime_to_dt(&modified_at);
+                dbg!(&mod_dt);
                 let mut file_dates = file_dates.lock().unwrap();
-                file_dates
-                    .entry(mod_dt)
-                    .or_insert_with(Vec::new)
-                    .push(file.to_string());
+                file_dates.insert(mod_dt, file.to_string());
             },
             Err(_) => println!("Opps")
         }
@@ -116,24 +117,41 @@ pub fn systime_to_dt(st: &std::time::SystemTime) -> chrono::DateTime<Utc> {
     // formats like "2001-07-08T00:34:60.026490+09:30"
 }
 
-pub fn find_session_files(file_times: HashMap<DateTime<Utc>, Vec<String>>, dt: DateTime<Utc>) -> Vec<Vec<String>> {
+pub fn find_session_files(file_times: HashMap<DateTime<Utc>, String>, dt: DateTime<Utc>) -> Vec<String> {
     let mut session_files = Vec::new();
-    for (file_time, files) in file_times {
-        if files.len() > 1 {
-            session_files.push(files);
+    for (file_time, file) in file_times {
+        if file_time > dt {
+            session_files.push(file);
         }
     }
     session_files
 }
 
 // invoke the actions along with the path and pattern and progress bar
-pub fn run_session(path: &str, pattern: &str, now: &SystemTime) -> Result<(), Box<dyn Error>> {
-    let dt = systime_to_dt(now);
+pub fn start_session(flag: &str) -> Result<(), Box<dyn Error>> {
+    let now: DateTime<Utc> = Utc::now();
+    let mut sessions = HashMap::new();
+    let name =
+        match flag {
+            "" => "_one",
+            _ => flag
+        };
+    sessions.insert(name, now);
+    Ok(())
+}
+
+
+// invoke the actions along with the path and pattern and progress bar
+pub fn run_session(path: &str, pattern: &str, time: &String) -> Result<(), Box<dyn Error>> {
+    // Just doing minutes for now
+    let duration = Duration::minutes(time.parse::<i64>().unwrap());
+    let now: DateTime<Utc> = Utc::now();
+    let target = now - duration;
     let files = walk(path)?;
-    let files = find(files, pattern, Some(&dt));
+    let files = find(files, pattern);
     println!("Found {} files matching {}", files.len(), pattern);
     let file_times = file_times(files)?;
-    let session_files = find_session_files(file_times, dt);
+    let session_files = find_session_files(file_times, target);
     println!("Found {} session files(s)", session_files.len());
     for session in session_files {
         println!("{:?}", session);
@@ -144,7 +162,7 @@ pub fn run_session(path: &str, pattern: &str, now: &SystemTime) -> Result<(), Bo
 // invoke the actions along with the path and pattern and progress bar
 pub fn run(path: &str, pattern: &str) -> Result<(), Box<dyn Error>> {
     let files = walk(path)?;
-    let files = find(files, pattern, None);
+    let files = find(files, pattern);
     println!("Found {} files matching {}", files.len(), pattern);
     let checksums = checksum(files)?;
     let duplicates = find_duplicates(checksums);
