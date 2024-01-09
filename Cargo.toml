@@ -12,6 +12,9 @@ md5 = "0.7.0"
 rayon = "1.6.1"
 indicatif = {version = "*", features = ["rayon"]}
 chrono = "0.4.31"
+directories = "5.0.1"
+serde = { version = "1.0.195", features = ["derive"] }
+toml = "0.8.8"
 
 [dev-dependencies]
 assert_cmd = "2"

@@ -87,7 +87,7 @@ pub fn file_times(files: Vec<String>) -> Result<HashMap<DateTime<Utc>, String>, 
                     };
                 let modified_at = modified.unwrap();
                 let mod_dt = systime_to_dt(&modified_at);
-                dbg!(&mod_dt);
+                // dbg!(&mod_dt);
                 let mut file_dates = file_dates.lock().unwrap();
                 file_dates.insert(mod_dt, file.to_string());
             },

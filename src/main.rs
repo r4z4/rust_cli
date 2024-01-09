@@ -1,6 +1,8 @@
 //Searches a path for duplicate files
 use clap::Parser;
-use std::time::SystemTime;
+use directories::ProjectDirs;
+use serde::Deserialize;
+use std::{time::SystemTime, fs};
 
 #[derive(Parser)]
 // Extend / Custom help info
@@ -13,6 +15,12 @@ use std::time::SystemTime;
 struct Cli {
     #[clap(subcommand)]
     command: Option<Commands>,
+}
+
+#[derive(Deserialize, Debug)]
+struct Config {
+    name: String,
+    port: Option<i16>,
 }
 
 #[derive(Parser)]
@@ -51,6 +59,26 @@ enum Commands {
 }
 
 fn main() {
+    // Get Config File
+    // Linux:   /home/<user>/.config/rust-cli
+    // Windows: C:\Users\<User>\AppData\Roaming\r4z4\rust-cli
+    // macOS:   /Users/<User>/Library/Application Support/dev.r4z4.rust-cli
+    if let Some(dirs) = ProjectDirs::from("dev","r4z4", "rust-cli")
+    {
+        let config_dir = dirs.config_dir();
+        let config_file = fs::read_to_string(
+            config_dir.join("config.toml")
+        );
+        let config =
+            match config_file {
+                Ok(file) => toml::from_str(&file).unwrap(),
+                Err(_) => Config {
+                    name: "Me".to_string(),
+                    port: Some(4000),
+                }
+            };
+        dbg!(config);
+    }
     let _now = SystemTime::now();
     let cli = Cli::parse();
     match cli.command {
